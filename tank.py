@@ -9,7 +9,14 @@ headers = {
     "Host": "travels.com",
     "User-Agent": "tank",
     "Accept": "*/*",
-    "Connection": "Close",
+    "Connection": "close",
+}
+
+headers_keep = {
+    "Host": "travels.com",
+    "User-Agent": "tank",
+    "Accept": "*/*",
+    "Connection": "keep-alive",
 }
 
 # path_to_ammo = '/path/to/data/FULL/{}/{}'
@@ -24,13 +31,14 @@ def check_get(answer_name):
     tm = 0
     t_min = 100000
     t_max = 0
+    session = requests.Session()
     with open(path_to_ammo.format('answers', answer_name), "r") as f:
         for line in f.readlines():
             vals = line.strip().split("\t")
 
             before = datetime.now()
-            r = requests.get(host_template.format(vals[1]),
-                             headers=headers)
+            r = session.get(host_template.format(vals[1]),
+                            headers=headers_keep)
             after = datetime.now()
             df = (after - before).microseconds
             tm += df
