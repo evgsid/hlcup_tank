@@ -1,136 +1,201 @@
 #!/usr/bin/env python
 # coding: utf8
 
-import requests
+import argparse
 import json
+import os
+import requests
 from datetime import datetime
 
-headers = {
-    "Host": "travels.com",
-    "User-Agent": "tank",
+headers_post = {
+    "Host": "accounts.com",
+    "User-Agent": "Technolab/1.0 (Docker; CentOS) Highload/1.0",
     "Accept": "*/*",
     "Connection": "close",
+    "Content-Type": "application/json",
 }
 
-headers_keep = {
-    "Host": "travels.com",
-    "User-Agent": "tank",
+headers_get = {
+    "Host": "accounts.com",
+    "User-Agent": "Technolab/1.0 (Docker; CentOS) Highload/1.0",
     "Accept": "*/*",
     "Connection": "keep-alive",
 }
 
-# path_to_ammo = '/path/to/data/FULL/{}/{}'
-path_to_ammo = '/path/to/data/TRAIN/{}/{}'
-host_template = 'http://localhost:8080{}'
+path_to_ammo = ''
+host = ''
 
 ignore_results = False
 
 
+class RequestTime(object):
+    def __init__(self):
+        self.count = 0
+        self.total_time = 0
+        self.t_min = 100000
+        self.t_max = 0
+
+    def add(self, before, after):
+        df = (after - before).microseconds
+        self.total_time += df
+        if df > self.t_max:
+            self.t_max = df
+        if df < self.t_min:
+            self.t_min = df
+        self.count += 1
+
+    def print_time(self):
+        print("avg: {}".format(self.total_time / self.count))
+        print("min: {}, max: {}".format(self.t_min, self.t_max))
+
+
+def get_expected_results(line):
+    # The typical answer line is:
+    # <type>  <request>  <response code> [<response body>]
+    vals = line.strip().split("\t")
+    # Add missed <response_body> if absent.
+    if len(vals) == 3:
+        vals.append(None)
+    return vals[1:]
+
+
+def check_response(response, expected_response_code, expected_response_body):
+    if ignore_results:
+        return
+    if response.status_code != int(expected_response_code):
+        print("ERROR: code mismatch")
+        print("Expected: {}, but received: {}".format(
+            expected_response_code, response.status_code))
+        print(answer_line)
+        print
+        return
+
+    expected = (json.loads(expected_response_body) if
+                expected_response_body else "")
+    try:
+        received = response.json()
+    except ValueError:
+        received = ""
+    if expected != received:
+        print("ERROR: answer mismatch")
+        print("Expected: {}".format(expected))
+        print("Received: {}".format(received))
+        print(answer_line)
+        print
+
+
 def check_get(answer_name):
-    i = 0
-    tm = 0
-    t_min = 100000
-    t_max = 0
+    request_time = RequestTime()
     session = requests.Session()
-    with open(path_to_ammo.format('answers', answer_name), "r") as f:
-        for line in f.readlines():
-            vals = line.strip().split("\t")
+    with open(os.path.join(path_to_ammo, "answers", answer_name), "r") as f:
+        for answer_line in f.readlines():
+            request, expected_response_code, expected_response_body = (
+                get_expected_results(answer_line))
 
             before = datetime.now()
-            r = session.get(host_template.format(vals[1]),
-                            headers=headers_keep)
+            response = session.get(host + request,
+                                   headers=headers_get)
             after = datetime.now()
-            df = (after - before).microseconds
-            tm += df
-            if df > t_max:
-                t_max = df
-            if df < t_min:
-                t_min = df
-            i += 1
-            if not ignore_results:
-                if r.status_code != int(vals[2]):
-                    print("ERROR: code mismatch")
-                    print("Expected: {}, but received: {}".format(
-                        vals[2], r.status_code))
-                    print(line)
-                if r.status_code != 200:
-                    continue
-                expected = json.loads(vals[3])
-                received = r.json()
-                if expected != received:
-                    print("ERROR: answer mismatch")
-                    print("Expected: ", expected)
-                    print("Received: ", received)
-                    print(line)
-                    print
+            request_time.add(before, after)
+            check_response(response, expected_response_code,
+                           expected_response_body)
 
-    print("avg: {}".format(tm / i))
-    print("min: {}, max: {}".format(t_min, t_max))
+    request_time.print_time()
 
 
 def check_post(ammo_name, answer_name):
-    i = 0
-    tm = 0
-    t_min = 100000
-    t_max = 0
-    with open(path_to_ammo.format('ammo', ammo_name), "r") as ammo:
-        with open(path_to_ammo.format('answers', answer_name), "r") as answer:
-            for line in answer.readlines():
-                answer_vals = line.strip().split("\t")
-                # 312 POST:/locations/<entity_id>
-                # POST /locations/110?query_id=0 HTTP/1.1
-                # Host: travels.com
-                # User-Agent: tank
-                # Accept: */*
-                # Connection: Close
-                # Content-Length: 145
-                # Content-Type: application/json
-                #
-                # {"distance": 61, "country": "\u0428\u0432\u0435\u0439\u0446\u0430\u0440\u0438\u044f", "city": "\u041c\u0443\u0440\u043b\u0430\u043c\u0441\u043a"}
-                ammo.readline()
-                req_line = ammo.readline().strip()
-                req = req_line.split(" ")
-                if (req[0] != answer_vals[0] or req[1] != answer_vals[1]):
-                    print("ERROR: request/answer mismatch")
-                    print("Request: ", req_line)
-                    print("Response: ", line)
-                empty = False
-                for _ in range(0, 6):
-                    l = ammo.readline().strip()
-                    if l.startswith('Content-Length'):
-                        _, content_length = l.split(' ')
-                    if l == '':
-                        empty = True
-                        break
-                if not empty and content_length != "0":
-                    ammo.readline()
-                    payload = ammo.readline().strip()
-                elif content_length == "0":
-                    ammo.readline()
-                    payload = ''
-                else:
-                    payload = ''
-                before = datetime.now()
-                r = requests.post(host_template.format(answer_vals[1]),
-                                  headers=headers, data=payload)
-                after = datetime.now()
-                df = (after - before).microseconds
-                tm += df
-                if df > t_max:
-                    t_max = df
-                if df < t_min:
-                    t_min = df
-                i += 1
-                if not ignore_results:
-                    if r.status_code != int(answer_vals[2]):
-                        print("ERROR: code mismatch")
-                        print("Expected: {}, but received: {}".format(
-                            answer_vals[2], r.status_code))
-                        print(line)
-    print("avg: {}".format(tm / i))
-    print("min: {}, max: {}".format(t_min, t_max))
+    request_time = RequestTime()
+    ammo = open(os.path.join(path_to_ammo, "ammo", ammo_name), "r")
+    with open(os.path.join(path_to_ammo, "answers", answer_name),
+              "r") as answer:
+        for answer_line in answer.readlines():
+            # The typical request from ammo file during POST phase:
+            #
+            # 746 POST:/accounts/<id>/
+            # POST /accounts/7316/?query_id=500 HTTP/1.1
+            # Host: accounts.com
+            # User-Agent: Technolab/1.0 (Docker; CentOS) Highload/1.0
+            # Accept: */*
+            # Connection: close
+            # Content-Length: 536
+            # Content-Type: application/json
+            #
+            # {...}
+
+            # Skip the first line "746 POST:/accounts/<id>/"
+            ammo.readline()
+
+            # Read the second line and compare it with the appropriate line
+            # from the answ file to be sure that we check corresponding
+            # requets and answers. Just simple sanity check.
+            req_line = ammo.readline().strip()
+            request, expected_response_code, expected_response_body = (
+                get_expected_results(answer_line))
+            if (req_line.split(" ")[1] != request):
+                print("FATAL: request/answer mismatch")
+                print("Request: {}".format(req_line))
+                print("Response: {}".format(answer_line))
+                exit(1)
+
+            # Read through the next header lines.
+            for _ in range(0, 6):
+                header_line = ammo.readline().strip()
+                if header_line.startswith("Content-Length:"):
+                    _, content_length = header_line.split(" ")
+            ammo.readline()  # empty line after header
+            payload = ""
+            if content_length != "0":
+                payload = ammo.readline().strip()
+
+            before = datetime.now()
+            response = requests.post(host + request,
+                                     headers=headers_post, data=payload)
+            after = datetime.now()
+            request_time.add(before, after)
+            check_response(response, expected_response_code,
+                           expected_response_body)
+
+    ammo.close()
+    request_time.print_time()
 
 
-check_get('phase_1_get.answ')
-check_post('phase_2_post.ammo', 'phase_2_post.answ')
-check_get('phase_3_get.answ')
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="http://localhost:8080")
+    parser.add_argument("--ammo_dir",
+                        help="Path to the root dir with ammo and answers.")
+    parser.add_argument("--all", action="store_true",
+                        help="Run all three phases in series, default action.")
+    parser.add_argument("--phase1", action="store_true",
+                        help="Run phase 1.")
+    parser.add_argument("--phase2", action="store_true",
+                        help="Run phase 2.")
+    parser.add_argument("--phase3", action="store_true",
+                        help="Run phase 3.")
+    parser.add_argument("--ignore_results", action="store_true", default=False,
+                        help="Do not check answers from the server.")
+
+    args = parser.parse_args()
+    if not args.ammo_dir:
+        print("ERROR: You have to specify the path to ammo!\n")
+        parser.print_help()
+        exit(1)
+    if args.all and (args.phase1 or args.phase2 or args.phase3):
+        print("ERROR: --all and --phaseX are mutually exclusive!\n")
+        parser.print_help()
+        exit(1)
+    if not (args.phase1 or args.phase2 or args.phase3):
+        args.all = True
+    if args.all:
+        args.phase1 = args.phase2 = args.phase3 = True
+
+    host = args.host
+    path_to_ammo = args.ammo_dir
+    ignore_results = args.ignore_results
+
+    if args.phase1:
+        check_get('phase_1_get.answ')
+    if args.phase2:
+        check_post('phase_2_post.ammo', 'phase_2_post.answ')
+    if args.phase3:
+        check_get('phase_3_get.answ')
