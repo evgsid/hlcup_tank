@@ -59,7 +59,8 @@ def get_expected_results(line):
     return vals[1:]
 
 
-def check_response(response, expected_response_code, expected_response_body):
+def check_response(response, expected_response_code, expected_response_body,
+                   answer_line):
     if ignore_results:
         return
     if response.status_code != int(expected_response_code):
@@ -91,14 +92,13 @@ def check_get(answer_name):
         for answer_line in f.readlines():
             request, expected_response_code, expected_response_body = (
                 get_expected_results(answer_line))
-
             before = datetime.now()
             response = session.get(host + request,
                                    headers=headers_get)
             after = datetime.now()
             request_time.add(before, after)
             check_response(response, expected_response_code,
-                           expected_response_body)
+                           expected_response_body, answer_line)
 
     request_time.print_time()
 
@@ -153,7 +153,7 @@ def check_post(ammo_name, answer_name):
             after = datetime.now()
             request_time.add(before, after)
             check_response(response, expected_response_code,
-                           expected_response_body)
+                           expected_response_body, answer_line)
 
     ammo.close()
     request_time.print_time()
