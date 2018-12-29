@@ -26,6 +26,7 @@ path_to_ammo = ''
 host = ''
 
 ignore_results = False
+fail_on_error = False
 
 
 class RequestTime(object):
@@ -67,22 +68,30 @@ def check_response(response, expected_response_code, expected_response_body,
         print("ERROR: code mismatch")
         print("Expected: {}, but received: {}".format(
             expected_response_code, response.status_code))
+        print
         print(answer_line)
         print
+        if fail_on_error:
+            exit(1)
         return
 
-    expected = (json.loads(expected_response_body) if
+    expected = (json.dumps(json.loads(expected_response_body), sort_keys=True)
+                    .decode('unicode-escape').encode('utf8') if
                 expected_response_body else "")
     try:
-        received = response.json()
+        received = (json.dumps(response.json(), sort_keys=True)
+                    .decode('unicode-escape').encode('utf8'))
     except ValueError:
-        received = ""
+        received = response.text
     if expected != received:
         print("ERROR: answer mismatch")
-        print("Expected: {}".format(expected))
-        print("Received: {}".format(received))
+        print("=== Expected: ===\n{}".format(expected))
+        print("=== Received: ===\n{}".format(received))
+        print
         print(answer_line)
         print
+        if fail_on_error:
+            exit(1)
 
 
 def check_get(answer_name):
@@ -174,6 +183,8 @@ if __name__ == '__main__':
                         help="Run phase 3.")
     parser.add_argument("--ignore_results", action="store_true", default=False,
                         help="Do not check answers from the server.")
+    parser.add_argument("--fail_on_error", action="store_true", default=False,
+                        help="Immediately stop execution if answer mismatch.")
 
     args = parser.parse_args()
     if not args.ammo_dir:
@@ -192,6 +203,7 @@ if __name__ == '__main__':
     host = args.host
     path_to_ammo = args.ammo_dir
     ignore_results = args.ignore_results
+    fail_on_error = args.fail_on_error
 
     if args.phase1:
         check_get('phase_1_get.answ')
